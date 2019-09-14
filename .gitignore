@@ -1,0 +1,11 @@
+*.exe
+*.lk1
+*.map
+*.mk
+*.mk1
+*.obj
+*.sym
+*.err
+run.bat
+run.lnk
+run.conf
