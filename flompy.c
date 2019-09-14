@@ -2,7 +2,7 @@
 // FLOMPY
 // A floppy disk dumper for DOS environments.
 //
-// Version 1
+// Version 0
 // Brad Smith, 2019
 // http://rainwarrior.ca
 // https://github.com/bbbradsmith/flompy
@@ -21,6 +21,8 @@
 //   3 = unable to open output file
 //   4 = unexpected mode
 //   5 = unimplemented feature
+//   6 = output produced but with some failures
+//   7 = no output produced, fatal error
 //
 
 #include <bios.h>
@@ -31,10 +33,12 @@
 #include <string.h>
 #include <unistd.h>
 
-const int VERSION = 1;
+const int VERSION = 0;
 
 // maximum sector size for high level read buffer
 #define MAX_SECTOR_SIZE 2048
+// number of retries for BIOS operations
+#define HIGH_RETRIES 8
 
 typedef uint32_t     uint32;
 typedef uint16_t     uint16;
@@ -60,7 +64,7 @@ const char* MODE_NAME[MODE_COUNT] = {
 	"FTRACK",
 };
 
-int sector_bytes = 512;
+int sector_bytes = -1;
 int track_sectors = -1;
 int tracks = -1;
 int sides = -1;
@@ -82,6 +86,14 @@ uint8 highdata[MAX_SECTOR_SIZE];
 //
 // misc functions
 //
+
+void open_output(); // exit(3) if file could not be opened
+
+void printparam(int p) // for unspecified parameter diagnostic
+{
+	if (p < 0) printf("UNKNOWN");
+	else printf("%d",p);
+}
 
 void dump(const uint8* buffer, int length) // dump hex 
 {
@@ -143,6 +155,18 @@ const char* high_error(uint8 e)
 	return UNKNOWN_HIGH_ERROR;
 };
 
+uint8 high_retry(unsigned service) // retries a BIOS operation multiple times or until success
+{
+	uint8 result;
+	int i = HIGH_RETRIES;
+	for (; i; --i)
+	{
+		result = _bios_disk(service, &diskinfo) >> 8;
+		if (result == 0) break;
+	}
+	return result;
+}
+
 uint8 high_reset()
 {
 	diskinfo.drive = device;
@@ -151,18 +175,19 @@ uint8 high_reset()
 	diskinfo.sector = 0;
 	diskinfo.nsectors = 0;
 	diskinfo.buffer = highdata;
-	return _bios_disk(_DISK_RESET, &diskinfo) >> 8;
+	return high_retry(_DISK_RESET);
 }
 
 uint8 high_read_sector(int track, int side, int sector)
 {
+	memset(highdata, fill & 0xFF, sizeof(highdata));
 	diskinfo.drive = device;
 	diskinfo.head = side;
 	diskinfo.track = track;
 	diskinfo.sector = sector;
 	diskinfo.nsectors = 1;
 	diskinfo.buffer = highdata;
-	return _bios_disk(_DISK_READ, &diskinfo) >> 8;
+	return high_retry(_DISK_READ);
 }
 
 uint16 high16(int pos) // fetch 16-bit little-endian value from highdata
@@ -182,7 +207,6 @@ uint16 high16(int pos) // fetch 16-bit little-endian value from highdata
 int mode_boot()
 {
 	int i;
-	printf("\n");
 	if (highdata[0x26] == 0x29)
 	{
 		printf("$027 ID: ");
@@ -202,12 +226,75 @@ int mode_boot()
 		for (i=0; i<4; ++i) printf("%02X",highdata[0x23-i]);
 		printf("\n");
 	}
+	printf("Completed.\n");
 	return 0;
 }
 
 int mode_high()
 {
-	return 5;
+	int c,h,s;
+	int invalid;
+	uint8 result;
+
+	// auto detection
+	if (sector_bytes < 0) sector_bytes = boot_sector_bytes;
+	if (sector_bytes < 0) sector_bytes = 512; // default
+	if (track_sectors < 0) track_sectors = boot_track_sectors;
+	if (sides < 0) sides = boot_sides;
+	if (tracks < 0)
+	{
+		// if not yet specified, assume number of sides based on number of sectors
+		if (sides <= 0)
+		{
+			sides = (boot_total_sectors > 0 && boot_total_sectors < 1000) ? 1 : 2;
+		}
+		// automatic track count, rounding up to include all sepcified sectors
+		tracks = (boot_total_sectors + ((track_sectors * sides)-1)) / (track_sectors * sides);
+	}
+	if (sides <= 0 || sides > 2) sides = 2; // default to 2
+
+	// actual parameters
+	printf("High: ");
+	printparam(tracks);
+	printf(" tracks, ");
+	printparam(sides);
+	printf(" sides, ");
+	printparam(track_sectors);
+	printf(" sectors, ");
+	printparam(sector_bytes);
+	printf(" bytes\n");
+
+	invalid = 0;
+	if (tracks < 0) { fprintf(stderr,"Track count unspecified.\n"); invalid=1; }
+	if (track_sectors < 0) { fprintf(stderr,"Sectors per track unspecified.\n"); invalid=1; }
+	if (sector_bytes > MAX_SECTOR_SIZE) { fprintf(stderr,"Sector size too large. Maximum: %d\n",MAX_SECTOR_SIZE); invalid=1; }
+	if (invalid) return 7; // fatal error
+
+	open_output();
+
+	invalid = 0;
+	for (c=0; c<tracks; ++c)
+	for (h=0; h<sides; ++h)
+	for (s=1; s<=track_sectors; ++s)
+	{
+		printf("%02d:%02d:%02d\r",c,h,s);
+		fflush(stdout); // because \r is not a newline it doesn't flush automatically
+		result = high_read_sector(c,h,s);
+		if (result)
+		{
+			++invalid;
+			fprintf(stderr,"%02d:%02d:%02d error: %s\n",c,h,s,high_error(result));
+		}
+		fwrite(highdata,1,sector_bytes,f);
+	}
+	
+	if (invalid)
+	{
+		printf("Completed, with errors.\n");
+		return 6;
+	}
+	printf("Completed.\n");
+	return 0;
 }
 
 int mode_low()
@@ -222,7 +309,53 @@ int mode_full()
 
 int mode_sector()
 {
-	return 5;
+	int c,h,s;
+	int invalid;
+	uint8 result;
+
+	// auto detection
+	if (sector_bytes < 0) sector_bytes = boot_sector_bytes;
+	if (sector_bytes < 0) sector_bytes = 512; // default
+
+	// actual parameters
+	printf("Sector: track ");
+	printparam(tracks);
+	printf(", side ");
+	printparam(sides);
+	printf(", sector ");
+	printparam(track_sectors);
+	printf(", ");
+	printparam(sector_bytes);
+	printf(" bytes\n");
+
+	invalid = 0;
+	if (tracks < 0) { invalid=1; fprintf(stderr,"Track unspecified.\n"); }
+	if (sides < 0) { invalid=1; fprintf(stderr,"Side unspecified.\n"); }
+	if (track_sectors < 0) { invalid=1; fprintf(stderr,"Sector unspecified.\n"); }
+	if (sector_bytes > MAX_SECTOR_SIZE) { invalid=1; fprintf(stderr,"Sector size too large. Maximum: %d\n",MAX_SECTOR_SIZE); }
+	if (invalid) return 7; // fatal error
+
+	open_output();
+
+	c = tracks;
+	h = sides;
+	s = track_sectors;
+	printf("%02d:%02d:%02d\r",c,h,s);
+	result = high_read_sector(c,h,s);
+	if (result)
+	{
+		++invalid;
+		fprintf(stderr,"%02d:%02d:%02d error: %s\n",c,h,s,high_error(result));
+	}
+	fwrite(highdata,1,sector_bytes,f);
+	
+	if (invalid)
+	{
+		printf("Completed, with errors.\n");
+		return 6;
+	}
+	printf("Completed.\n");
+	return 0;
 }
 
 int mode_track()
@@ -243,7 +376,7 @@ const char* ARGS_INFO =
 "\n"
 "FLOMPY options:\n"
 " -b 512    Specify bytes per sector, default 512.\n"
-" -h 1      Specify total sides (1,2), or side (0,1).\n"
+" -h 1      Specify total sides (1,2) default 2, or side (0,1).\n"
 " -t 80     Specify total tracks or track.\n"
 " -s 9      Specify sectors per track, or specific sector.\n"
 " -d 0      Specify device (0,1) = (A:,B:), default 0.\n"
@@ -282,6 +415,17 @@ void intarg(int* opt, int min, int max)
 		fprintf(stderr,"Parameter %d out of range %d to %d.\n",*opt,min,max);
 		args_error();
 	}
+}
+
+void open_output() // exits if file could not be opened
+{
+	f = fopen(filename, "wb");
+	if (f == NULL)
+	{
+		fprintf(stderr,"Unable to open output file: %s\n",filename);
+		exit(3);
+	}
+	printf("Opened output file: %s\n",filename);
 }
 
 int main(int argc, char** argv)
@@ -375,7 +519,7 @@ int main(int argc, char** argv)
 	printf(" done.\n");
 
 	printf("Reading boot sector for device %d...",device);
-	result = high_read_sector(0,0,0);
+	result = high_read_sector(0,0,1);
 	if (result != 0)
 	{
 		printf("\n");
@@ -390,18 +534,7 @@ int main(int argc, char** argv)
 		boot_track_sectors = high16(0x018);
 		boot_sides         = high16(0x01C);
 		if (boot_total_sectors == 0) boot_total_sectors = high16(0x020);
-		dump(highdata,128); // for debugging
-	}
-
-	if (mode != MODE_BOOT)
-	{
-		f = fopen(filename, "wb");
-		if (f == NULL)
-		{
-			fprintf(stderr,"Unable to open output file: %s\n",filename);
-			return 3;
-		}
-		printf("Opened output file: %s\n",filename);
+		//dump(highdata,128); // boot sector data debug
 	}
 
 	switch(mode)
