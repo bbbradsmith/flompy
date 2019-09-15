@@ -249,7 +249,7 @@ int mode_high()
 			sides = (boot_total_sectors > 0 && boot_total_sectors < 1000) ? 1 : 2;
 		}
 		// automatic track count, rounding up to include all sepcified sectors
-		tracks = (boot_total_sectors + ((track_sectors * sides)-1)) / (track_sectors * sides);
+		tracks = (boot_total_sectors + ((track_sectors * sides) - 1)) / (track_sectors * sides);
 	}
 	if (sides <= 0 || sides > 2) sides = 2; // default to 2
 
@@ -377,7 +377,7 @@ const char* ARGS_INFO =
 "FLOMPY options:\n"
 " -b 512    Specify bytes per sector, default 512.\n"
 " -h 1      Specify total sides (1,2) default 2, or side (0,1).\n"
-" -t 80     Specify total tracks or track.\n"
+" -t 80     Specify total tracks (cylinders) or track.\n"
 " -s 9      Specify sectors per track, or specific sector.\n"
 " -d 0      Specify device (0,1) = (A:,B:), default 0.\n"
 " -r 1      Data rate (0,1,2,3) = (500,350,250,1000) k/s, default 1.\n"
@@ -532,7 +532,7 @@ int main(int argc, char** argv)
 		boot_sector_bytes  = high16(0x00B);
 		boot_total_sectors = high16(0x013);
 		boot_track_sectors = high16(0x018);
-		boot_sides         = high16(0x01C);
+		boot_sides         = high16(0x01A);
 		if (boot_total_sectors == 0) boot_total_sectors = high16(0x020);
 		//dump(highdata,128); // boot sector data debug
 	}
