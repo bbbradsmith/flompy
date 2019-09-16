@@ -7,63 +7,53 @@
 // http://rainwarrior.ca
 // https://github.com/bbbradsmith/flompy
 //
-// C99
-// Compiled with Open Watcom
+// Compiled with Open Watcom, 16-Bit real mode, large memory model
 // http://openwatcom.org
 //
 
-//
-// Exit codes:
-//   0 = success
-//  -1 = argument failure
-//   1 = fail to reset drives
-//   2 = failure to read boot sector (-m boot)
-//   3 = unable to open output file
-//   4 = unexpected mode
-//   5 = unimplemented feature
-//   6 = output produced but with some failures
-//   7 = no output produced, fatal error
-//
-
-#include <bios.h>
-#include <limits.h>
+#include <bios.h>     // _bios_disk
+#include <conio.h>    // inp, outp
+#include <dos.h>      // _dos_getvect, _dos_setvect
+#include <i86.h>      // _interrupt, _disable, _enable
+#include <limits.h>   // INT_MIN, INT_MAX
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <unistd.h>   // getopt
 
 const int VERSION = 0;
 
 // maximum sector size for high level read buffer
-#define MAX_SECTOR_SIZE 2048
+#define MAX_SECTOR_SIZE   2048
+
 // number of retries for BIOS operations
-#define HIGH_RETRIES 8
+const int HIGH_RETRIES = 8;
+
+// maximum track size for low level read buffer
+// (chosen so that MAX_TRACK_SIZE * 2 < 64k so timing can fit in a segment)
+const int MAX_TRACK_SIZE = 31000;
+
+// Exit codes, later versions may append to but not reorder this list
+enum {
+	RESULT_SUCCESS  = 0, // success
+	RESULT_ARGS     = 1, // argument failure
+	RESULT_RESET    = 2, // failure to read boot sector (-m boot)
+	RESULT_BOOT     = 3, //
+	RESULT_OUTPUT   = 4, // unable to open output file
+	RESULT_MODE     = 5, // unexpected mode
+	RESULT_TODO     = 6, // unimplemented feature
+	RESULT_PARTIAL  = 7, // partial success, output produced but with errors
+	RESULT_FATAL    = 8, // fatal error, no output produced
+	RESULT_MEMORY   = 9, // out of memory
+};
 
 typedef uint32_t     uint32;
 typedef uint16_t     uint16;
 typedef uint8_t      uint8;
 typedef unsigned int uint;
 
-#define MODE_BOOT   0
-#define MODE_HIGH   1
-#define MODE_LOW    2
-#define MODE_FULL   3
-#define MODE_SECTOR 4
-#define MODE_TRACK  5
-#define MODE_FTRACK 6
-#define MODE_COUNT  7
-
-const char* MODE_NAME[MODE_COUNT] = {
-	"BOOT",
-	"HIGH",
-	"LOW",
-	"FULL",
-	"SECTOR",
-	"TRACK",
-	"FTRACK",
-};
-
+// command line parameters
 int sector_bytes = -1;
 int track_sectors = -1;
 int tracks = -1;
@@ -74,20 +64,52 @@ int fill = 0x00;
 int mode = -1;
 const char* filename = NULL;
 
+// parameters auto-detected from boot sector
 int boot_sector_bytes = -1;
 int boot_track_sectors = -1;
 int boot_total_sectors = -1;
 int boot_sides = -1;
 
-FILE* f = NULL;
+FILE* f = NULL; // output file
 
+// high level read buffer
 uint8 highdata[MAX_SECTOR_SIZE];
+
+// low level read buffers
+volatile uint lowpos; // bytes read from track
+uint8* lowdata = NULL; // complete track
+uint8* lowfuzzy = NULL; // fuzzy bitmask
+uint8* lowref = NULL; // reference track for fuzzy comparision
+uint16* lowtime = NULL; // timing values
+
+void (__interrupt __far *floppy_irq_old)() = NULL;
+volatile int floppy_irq_mode;
 
 //
 // misc functions
 //
 
-void open_output(); // exit(3) if file could not be opened
+void open_output(); // exit(RESULT_OUTPUT) if file could not be opened
+
+void* get_memory(size_t size) // exit(RESULT_MEMORY) if could not be allocated
+{
+	void* p = malloc(size);
+	if (p == NULL)
+	{
+		fprintf(stderr,"Out of memory.\n");
+		exit(RESULT_MEMORY);
+	}
+	return p;
+}
+
+void free_all()
+{
+	if (f != NULL) fclose(f);
+	free(lowdata);
+	free(lowfuzzy);
+	free(lowref);
+	free(lowtime);
+}
 
 void printparam(int p) // for unspecified parameter diagnostic
 {
@@ -112,10 +134,10 @@ void dump(const uint8* buffer, int length) // dump hex
 // high level BIOS operations
 //
 
-const char* UNKNOWN_HIGH_ERROR = "Unknown INT 13h error";
+const char* const UNKNOWN_HIGH_ERROR = "Unknown INT 13h error";
 struct diskinfo_t diskinfo;
 
-typedef struct { uint8 code; const char* text; } BiosErrorCode;
+typedef struct { uint8 code; const char* const text; } BiosErrorCode;
 const BiosErrorCode HIGH_ERROR[] = {
 	{ 0x00, "Success" },
 	{ 0x01, "Bad command" },
@@ -200,9 +222,60 @@ uint16 high16(int pos) // fetch 16-bit little-endian value from highdata
 // low level operations
 //
 
+const char* const UNKNOWN_LOW_ERROR = "Unknown FDC error";
+
+enum {
+	LOW_SUCCESS = 0,
+	LOW_COUNT
+};
+
+const char* const LOW_ERROR[LOW_COUNT] = {
+	"Success",
+};
+
+const char* low_error(uint8 e)
+{
+	if (e >= LOW_COUNT) return UNKNOWN_LOW_ERROR;
+	return LOW_ERROR[e];
+}
+
+void __interrupt __far floppy_irq()
+{
+	// TODO
+	if (lowtime)
+	{
+		// read system timer (16 bit counter that decrements at 1,193,182 Hz)
+		outp(0x43,0x00);
+		lowtime[lowpos]  = inp(0x40);
+		lowtime[lowpos] |= inp(0x40) << 8;
+	}
+	++lowpos;
+}
+
+void install_floppy_irq()
+{
+	_disable();
+	floppy_irq_old = _dos_getvect(0x0E);
+	_dos_setvect(0x0E, floppy_irq);
+	floppy_irq_mode = 0;
+	_enable();
+}
+
+void restore_floppy_irq()
+{
+	_disable();
+	_dos_setvect(0x0E, floppy_irq_old);
+	floppy_irq_old = NULL;
+	_enable();
+}
+
+// TODO
+
 //
 // modes
 //
+
+const char* DATARATE[4] = { "500", "350", "250", "1000" };
 
 int mode_boot()
 {
@@ -227,7 +300,7 @@ int mode_boot()
 		printf("\n");
 	}
 	printf("Completed.\n");
-	return 0;
+	return RESULT_SUCCESS;
 }
 
 int mode_high()
@@ -268,7 +341,7 @@ int mode_high()
 	if (tracks < 0) { fprintf(stderr,"Track count unspecified.\n"); invalid=1; }
 	if (track_sectors < 0) { fprintf(stderr,"Sectors per track unspecified.\n"); invalid=1; }
 	if (sector_bytes > MAX_SECTOR_SIZE) { fprintf(stderr,"Sector size too large. Maximum: %d\n",MAX_SECTOR_SIZE); invalid=1; }
-	if (invalid) return 7; // fatal error
+	if (invalid) return RESULT_FATAL; // fatal error
 
 	open_output();
 
@@ -291,20 +364,67 @@ int mode_high()
 	if (invalid)
 	{
 		printf("Completed, with errors.\n");
-		return 6;
+		return RESULT_PARTIAL;
 	}
 	printf("Completed.\n");
-	return 0;
+	return RESULT_SUCCESS;
 }
 
 int mode_low()
 {
-	return 5;
+	//int c,h,s;
+	int invalid;
+	//uint8 result;
+
+	// auto detection
+	if (sides < 0) sides = boot_sides;
+	if (tracks < 0)
+	{
+		// if not yet specified, assume number of sides based on number of sectors
+		if (sides <= 0)
+		{
+			sides = (boot_total_sectors > 0 && boot_total_sectors < 1000) ? 1 : 2;
+		}
+		// automatic track count, rounding up to include all sepcified sectors
+		tracks = (boot_total_sectors + ((track_sectors * sides) - 1)) / (track_sectors * sides);
+	}
+	if (sides <= 0 || sides > 2) sides = 2; // default to 2
+
+	// actual parameters
+	printf("Low: ");
+	printparam(tracks);
+	printf(" tracks, ");
+	printparam(sides);
+	printf(" sides, %skb/s data rate.",DATARATE[datarate]);
+
+	invalid = 0;
+	if (tracks < 0) { fprintf(stderr,"Track count unspecified.\n"); invalid=1; }
+	if (invalid) return RESULT_FATAL; // fatal error
+
+	// allocate memory and open output
+	lowdata = get_memory(MAX_TRACK_SIZE);
+
+	open_output();
+
+	// TODO
+
+	fprintf(stderr,"Unimplemented mode.\n");
+	return RESULT_TODO;
 }
 
 int mode_full()
 {
-	return 5;
+	// validate parameters
+
+	lowtime = get_memory(MAX_TRACK_SIZE*2);
+	lowdata = get_memory(MAX_TRACK_SIZE);
+	lowfuzzy = get_memory(MAX_TRACK_SIZE);
+	lowref = get_memory(MAX_TRACK_SIZE);
+	
+	//open_output();
+
+	fprintf(stderr,"Unimplemented mode.\n");
+	return RESULT_TODO;
 }
 
 int mode_sector()
@@ -333,7 +453,7 @@ int mode_sector()
 	if (sides < 0) { invalid=1; fprintf(stderr,"Side unspecified.\n"); }
 	if (track_sectors < 0) { invalid=1; fprintf(stderr,"Sector unspecified.\n"); }
 	if (sector_bytes > MAX_SECTOR_SIZE) { invalid=1; fprintf(stderr,"Sector size too large. Maximum: %d\n",MAX_SECTOR_SIZE); }
-	if (invalid) return 7; // fatal error
+	if (invalid) return RESULT_FATAL; // fatal error
 
 	open_output();
 
@@ -352,25 +472,48 @@ int mode_sector()
 	if (invalid)
 	{
 		printf("Completed, with errors.\n");
-		return 6;
+		return RESULT_PARTIAL;
 	}
 	printf("Completed.\n");
-	return 0;
+	return RESULT_SUCCESS;
 }
 
 int mode_track()
 {
-	return 5;
+	fprintf(stderr,"Unimplemented mode.\n");
+	return RESULT_TODO;
 }
 
 int mode_ftrack()
 {
-	return 5;
+	fprintf(stderr,"Unimplemented mode.\n");
+	return RESULT_TODO;
 }
 
 //
 // command line parsing and main program
 //
+
+enum {
+	MODE_BOOT = 0,
+	MODE_HIGH,
+	MODE_LOW,
+	MODE_FULL,
+	MODE_SECTOR,
+	MODE_TRACK,
+	MODE_FTRACK,
+	MODE_COUNT
+};
+
+const char* MODE_NAME[MODE_COUNT] = {
+	"BOOT",
+	"HIGH",
+	"LOW",
+	"FULL",
+	"SECTOR",
+	"TRACK",
+	"FTRACK",
+};
 
 const char* ARGS_INFO =
 "\n"
@@ -397,7 +540,7 @@ const char* ARGS_INFO =
 void args_error()
 {
 	printf(ARGS_INFO,VERSION);
-	exit(-1);
+	exit(RESULT_ARGS);
 }
 
 void intarg(int* opt, int min, int max)
@@ -423,7 +566,7 @@ void open_output() // exits if file could not be opened
 	if (f == NULL)
 	{
 		fprintf(stderr,"Unable to open output file: %s\n",filename);
-		exit(3);
+		exit(RESULT_OUTPUT);
 	}
 	printf("Opened output file: %s\n",filename);
 }
@@ -514,7 +657,7 @@ int main(int argc, char** argv)
 	{
 		printf("\n");
 		fprintf(stderr,"BIOS disk reset failed.\n");
-		return 1;
+		return RESULT_RESET;
 	}
 	printf(" done.\n");
 
@@ -524,7 +667,7 @@ int main(int argc, char** argv)
 	{
 		printf("\n");
 		fprintf(stderr,"Boot sector not read, error %02Xh: %s\n", result, high_error(result));
-		if (mode == MODE_BOOT) return 2;
+		if (mode == MODE_BOOT) return RESULT_BOOT;
 	}
 	else
 	{
@@ -548,9 +691,9 @@ int main(int argc, char** argv)
 	case MODE_FTRACK: result = mode_ftrack(); break;
 	default:
 		fprintf(stderr,"Unexpected mode (%d).\n",mode);
-		result = 4;
+		result = RESULT_MODE;
 	}
 	
-	if (f != NULL) fclose(f);
+	free_all(); // also closes f
 	return result;
 }
