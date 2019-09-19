@@ -731,9 +731,9 @@ void mode_low_track_write()
 {
 	uint i;
 	uint16 t;
-	uint32 w = lowpos; // convert to 32 bit value
-	fwrite(&w,4,1,f);
-	fwrite(lowdata,1,lowpos,f);
+	uint32 w = lowpos;
+	fwrite(&w,4,1,f); // 32 bit data length
+	fwrite(lowdata,1,lowpos,f); // data
 	if (lowtime_on)
 	{
 		// convert count-down timer to count-up relative to first time
@@ -742,7 +742,7 @@ void mode_low_track_write()
 		{
 			lowtime[i] = (0xFFFF - lowtime[i]) - t;
 		}
-		fwrite(lowtime,2,lowpos,f);
+		fwrite(lowtime,2,lowpos,f); // timing data (16-bit values)
 	}
 }
 
@@ -771,6 +771,8 @@ int mode_low_finish()
 		low_close();
 		// not certain why I need to close/open for each track read,
 		// but it might get interrupted by the file write?
+		fputc(c,f); // track
+		fputc(h,f); // side
 		mode_low_track_write();
 		bytes_read += lowpos;
 	}
@@ -878,7 +880,7 @@ int mode_track_finish()
 int mode_track()
 {
 	uint8 result;
-	result = mode_low_start("Track");
+        result = mode_track_start("Track");
 	if (result != RESULT_SUCCESS) return result;
 
 	// allocate memory and open output
@@ -891,7 +893,7 @@ int mode_track()
 int mode_ftrack()
 {
 	uint8 result;
-	result = mode_low_start("Ftrack");
+        result = mode_track_start("Ftrack");
 	if (result != RESULT_SUCCESS) return result;
 
 	// allocate memory and open output
