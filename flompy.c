@@ -44,17 +44,17 @@ const int VERSION = 1;
 
 // Exit codes, later versions may append to but not reorder this list
 enum {
-        RESULT_SUCCESS  = 0, // success
-        RESULT_ARGS     = 1, // argument failure
-        RESULT_RESET    = 2, // failure to read boot sector (-m boot)
-        RESULT_BOOT     = 3, //
-        RESULT_OUTPUT   = 4, // unable to open output file
-        RESULT_MODE     = 5, // unexpected mode
-        RESULT_TODO     = 6, // unimplemented feature
-        RESULT_PARTIAL  = 7, // partial success, output produced but with errors
-        RESULT_FATAL    = 8, // fatal error, no output produced
-        RESULT_MEMORY   = 9, // out of memory
-        RESULT_LOW      = 10, // unable to begin low level control
+	RESULT_SUCCESS  = 0, // success
+	RESULT_ARGS     = 1, // argument failure
+	RESULT_RESET    = 2, // failure to read boot sector (-m boot)
+	RESULT_BOOT     = 3, //
+	RESULT_OUTPUT   = 4, // unable to open output file
+	RESULT_MODE     = 5, // unexpected mode
+	RESULT_TODO     = 6, // unimplemented feature
+	RESULT_PARTIAL  = 7, // partial success, output produced but with errors
+	RESULT_FATAL    = 8, // fatal error, no output produced
+	RESULT_MEMORY   = 9, // out of memory
+	RESULT_LOW      = 10, // unable to begin low level control
 };
 
 typedef uint32_t     uint32;
@@ -115,39 +115,39 @@ void open_output(); // exit(RESULT_OUTPUT) if file could not be opened
 
 void* get_memory(size_t size) // exit(RESULT_MEMORY) if could not be allocated
 {
-        void* p = malloc(size);
-        if (p == NULL)
-        {
-                fprintf(stderr,"Out of memory.\n");
-                exit(RESULT_MEMORY);
-        }
-        return p;
+	void* p = malloc(size);
+	if (p == NULL)
+	{
+		fprintf(stderr,"Out of memory.\n");
+		exit(RESULT_MEMORY);
+	}
+	return p;
 }
 
 void free_all()
 {
-        if (f != NULL) fclose(f);
-        free(lowdata); lowdata = NULL;
-        free(lowtime); lowtime = NULL;
+	if (f != NULL) fclose(f);
+	free(lowdata); lowdata = NULL;
+	free(lowtime); lowtime = NULL;
 }
 
 void printparam(int p) // for unspecified parameter diagnostic
 {
-        if (p < 0) printf("UNKNOWN");
-        else printf("%d",p);
+	if (p < 0) printf("UNKNOWN");
+	else printf("%d",p);
 }
 
 void dump(const uint8* buffer, int length) // dump hex 
 {
-        int i;
-        for (i=0; i<length; ++i)
-        {
-                if ((i & 31) == 0) printf("%04X: ",i);
-                printf("%02X",buffer[i]);
-                if ((i & 31) == 31) printf("\n");
-                else if ((i & 7) == 7) printf(" ");
-        }
-        if ((length & 31) != 0) printf("\n");
+	int i;
+	for (i=0; i<length; ++i)
+	{
+		if ((i & 31) == 0) printf("%04X: ",i);
+		printf("%02X",buffer[i]);
+		if ((i & 31) == 31) printf("\n");
+		else if ((i & 7) == 7) printf(" ");
+	}
+	if ((length & 31) != 0) printf("\n");
 }
 
 //
@@ -159,83 +159,83 @@ struct diskinfo_t diskinfo;
 
 typedef struct { uint8 code; const char* const text; } BiosErrorCode;
 const BiosErrorCode HIGH_ERROR[] = {
-        { 0x00, "Success" },
-        { 0x01, "Bad command" },
-        { 0x02, "Address mark not found" },
-        { 0x03, "Attempt to write to write-protected disk" },
-        { 0x04, "Sector not found" },
-        { 0x05, "Reset failed" },
-        { 0x06, "Disk changed since last operation" },
-        { 0x07, "Drive parameter activity failed" },
-        { 0x08, "DMA overrun" },
-        { 0x09, "Attempt to DMA across 64kb boundary" },
-        { 0x0A, "Bad sector detected" },
-        { 0x0B, "Bad track detected" },
-        { 0x0C, "Media type not found" },
-        { 0x0D, "Invalid number of sector" },
-        { 0x0E, "Control data address mark detected" },
-        { 0x0F, "DMA out of range" },
-        { 0x10, "Data read CRC/ECC error" },
-        { 0x11, "CRC/ECC corrected data error" },
-        { 0x20, "Controller failure" },
-        { 0x40, "Seek operation failed" },
-        { 0x80, "Disk timed out or failed to respond" },
-        { 0xAA, "Drive not ready" },
-        { 0xBB, "Undefined error" },
-        { 0xCC, "Write fault" },
-        { 0xE0, "Status error" },
-        { 0xFF, "Sense operation failed" },
+	{ 0x00, "Success" },
+	{ 0x01, "Bad command" },
+	{ 0x02, "Address mark not found" },
+	{ 0x03, "Attempt to write to write-protected disk" },
+	{ 0x04, "Sector not found" },
+	{ 0x05, "Reset failed" },
+	{ 0x06, "Disk changed since last operation" },
+	{ 0x07, "Drive parameter activity failed" },
+	{ 0x08, "DMA overrun" },
+	{ 0x09, "Attempt to DMA across 64kb boundary" },
+	{ 0x0A, "Bad sector detected" },
+	{ 0x0B, "Bad track detected" },
+	{ 0x0C, "Media type not found" },
+	{ 0x0D, "Invalid number of sector" },
+	{ 0x0E, "Control data address mark detected" },
+	{ 0x0F, "DMA out of range" },
+	{ 0x10, "Data read CRC/ECC error" },
+	{ 0x11, "CRC/ECC corrected data error" },
+	{ 0x20, "Controller failure" },
+	{ 0x40, "Seek operation failed" },
+	{ 0x80, "Disk timed out or failed to respond" },
+	{ 0xAA, "Drive not ready" },
+	{ 0xBB, "Undefined error" },
+	{ 0xCC, "Write fault" },
+	{ 0xE0, "Status error" },
+	{ 0xFF, "Sense operation failed" },
 };
 
 const char* high_error(uint8 e)
 {
-        int i;
-        for (i=0; i < (sizeof(HIGH_ERROR)/sizeof(HIGH_ERROR[0])); ++i)
-        {
-                if (HIGH_ERROR[i].code == e) return HIGH_ERROR[i].text;
-        }
-        return UNKNOWN_HIGH_ERROR;
+	int i;
+	for (i=0; i < (sizeof(HIGH_ERROR)/sizeof(HIGH_ERROR[0])); ++i)
+	{
+		if (HIGH_ERROR[i].code == e) return HIGH_ERROR[i].text;
+	}
+	return UNKNOWN_HIGH_ERROR;
 };
 
 uint8 high_retry(unsigned service) // retries a BIOS operation multiple times or until success
 {
-        uint8 result;
-        int i = HIGH_RETRIES;
-        for (; i; --i)
-        {
-                result = _bios_disk(service, &diskinfo) >> 8;
-                if (result == 0) break;
-        }
-        return result;
+	uint8 result;
+	int i = HIGH_RETRIES;
+	for (; i; --i)
+	{
+		result = _bios_disk(service, &diskinfo) >> 8;
+		if (result == 0) break;
+	}
+	return result;
 }
 
 uint8 high_reset()
 {
-        diskinfo.drive = device;
-        diskinfo.head = 0;
-        diskinfo.track = 0;
-        diskinfo.sector = 0;
-        diskinfo.nsectors = 0;
-        diskinfo.buffer = highdata;
-        return high_retry(_DISK_RESET);
+	diskinfo.drive = device;
+	diskinfo.head = 0;
+	diskinfo.track = 0;
+	diskinfo.sector = 0;
+	diskinfo.nsectors = 0;
+	diskinfo.buffer = highdata;
+	return high_retry(_DISK_RESET);
 }
 
 uint8 high_read_sector(int track, int side, int sector)
 {
-        memset(highdata, fill & 0xFF, sizeof(highdata));
-        diskinfo.drive = device;
-        diskinfo.head = side;
-        diskinfo.track = track;
-        diskinfo.sector = sector;
-        diskinfo.nsectors = 1;
-        diskinfo.buffer = highdata;
-        return high_retry(_DISK_READ);
+	memset(highdata, fill & 0xFF, sizeof(highdata));
+	diskinfo.drive = device;
+	diskinfo.head = side;
+	diskinfo.track = track;
+	diskinfo.sector = sector;
+	diskinfo.nsectors = 1;
+	diskinfo.buffer = highdata;
+	return high_retry(_DISK_READ);
 }
 
 uint16 high16(int pos) // fetch 16-bit little-endian value from highdata
 {
-        return (highdata[pos+0] << 0)
-             | (highdata[pos+1] << 8);
+	return (highdata[pos+0] << 0)
+	     | (highdata[pos+1] << 8);
 }
 
 //
@@ -245,32 +245,32 @@ uint16 high16(int pos) // fetch 16-bit little-endian value from highdata
 const char* const UNKNOWN_LOW_ERROR = "Unknown FDC error";
 
 enum {
-        LOW_SUCCESS  = 0,
-        LOW_RESET,
-        LOW_CALIBRATE_TIMEOUT,
-        LOW_CALIBRATE,
-        LOW_SEEK_TIMEOUT,
-        LOW_SEEK,
-        LOW_TRACK_TIMEOUT,
-                LOW_EMPTY,
-        LOW_COUNT
+	LOW_SUCCESS  = 0,
+	LOW_RESET,
+	LOW_CALIBRATE_TIMEOUT,
+	LOW_CALIBRATE,
+	LOW_SEEK_TIMEOUT,
+	LOW_SEEK,
+	LOW_TRACK_TIMEOUT,
+	LOW_EMPTY,
+	LOW_COUNT
 };
 
 const char* const LOW_ERROR[LOW_COUNT] = {
-        "Success",
-        "Reset IRQ timeout",
-        "Calibrate IRQ timeout",
-        "Calibration failure",
-        "Seek IRQ timeout",
-        "Seek failure",
-        "Read track IRQ timeout",
-                "No data read from track",
+	"Success",
+	"Reset IRQ timeout",
+	"Calibrate IRQ timeout",
+	"Calibration failure",
+	"Seek IRQ timeout",
+	"Seek failure",
+	"Read track IRQ timeout",
+	"No data read from track",
 };
 
 const char* low_error(uint8 e)
 {
-        if (e >= LOW_COUNT) return UNKNOWN_LOW_ERROR;
-        return LOW_ERROR[e];
+	if (e >= LOW_COUNT) return UNKNOWN_LOW_ERROR;
+	return LOW_ERROR[e];
 }
 
 extern void __interrupt _far floppy_irq();
@@ -511,7 +511,7 @@ uint8 low_read_track(int track, int side)
 		floppy_write(track);
 		floppy_write(side);
 		floppy_write(0); // starting sector?
-	    floppy_write(0x07); // sector bytes, 07 = 16k (largest value within spec)
+		floppy_write(0x07); // sector bytes, 07 = 16k (largest value within spec)
 		floppy_write(0xFF); // keep reading until sector 255 or index
 		floppy_write(0); // gap length (ignored?)
 		floppy_write(0xFF); // data length
@@ -621,7 +621,7 @@ int mode_high()
 		}
 		fwrite(highdata,1,sector_bytes,f);
 	}
-	
+
 	if (invalid)
 	{
 		printf("Completed, with errors.\n");
@@ -674,7 +674,7 @@ int mode_sector()
 	}
 	else printf("\n");
 	fwrite(highdata,1,sector_bytes,f);
-	
+
 	if (invalid)
 	{
 		printf("Completed, with errors.\n");
@@ -880,7 +880,7 @@ int mode_track_finish()
 int mode_track()
 {
 	uint8 result;
-        result = mode_track_start("Track");
+	result = mode_track_start("Track");
 	if (result != RESULT_SUCCESS) return result;
 
 	// allocate memory and open output
@@ -893,7 +893,7 @@ int mode_track()
 int mode_ftrack()
 {
 	uint8 result;
-        result = mode_track_start("Ftrack");
+	result = mode_track_start("Ftrack");
 	if (result != RESULT_SUCCESS) return result;
 
 	// allocate memory and open output
