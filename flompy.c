@@ -2,7 +2,7 @@
 // FLOMPY
 // A floppy disk dumper for DOS environments.
 //
-// Version 0
+// Version 1
 // Brad Smith, 2019
 // http://rainwarrior.ca
 // https://github.com/bbbradsmith/flompy
