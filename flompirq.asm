@@ -60,9 +60,6 @@ data_finish:
     mov al, 0x20
     mov dx, 0x0020
     out dx, al
-    mov al,0x20
-    mov dx,0x0020
-    out dx,al
     pop ds
     pop dx
     pop bx
@@ -70,12 +67,12 @@ data_finish:
     iret
    
 ; command result
-result:    
+result:
     xor ax,ax
     mov word ptr offset DGROUP:_floppy_irq_wait, ax
-    mov al,0x20
-    mov dx,0x0020
-    out dx,al
+    mov al, 0x20
+    mov dx, 0x0020
+    out dx, al
     pop ds
     pop dx
     pop bx
