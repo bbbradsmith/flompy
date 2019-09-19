@@ -22,7 +22,7 @@
 #include <string.h>
 #include <unistd.h>   // getopt
 
-const int VERSION = 0;
+const int VERSION = 1;
 
 // maximum sector size for high level read buffer
 #define MAX_SECTOR_SIZE   2048
