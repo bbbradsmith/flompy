@@ -1,6 +1,6 @@
 # FLOMPY
 
-** A floppy disk dumping program for DOS. **
+**A floppy disk dumping program for DOS.**
 
 Brad Smith, 2019
 
@@ -61,27 +61,27 @@ Low level options:
 
 Displays some boot sector information from the floppy.
 
-`FLOMPY -m high <filename>`
+`FLOMPY -m high disk.img`
 
 High level sector-by-sector image dump.
 
-`FLOMPY -m sector -t 5 -h 0 -s 3 <filename>`
+`FLOMPY -m sector -t 5 -h 0 -s 3 disk503.sec`
 
 High level single sector dump.
 
-`FLOMPY -m low -r 0 <filename>`
+`FLOMPY -m low -r 0 disk.low`
 
 Low level track read dump. See format notes below.
 
-`FLOMPY -m full -r 0 <filename>`
+`FLOMPY -m full -r 0 disk.flw`
 
 Low level track read dump with per-byte timing. See format notes below.
 
-`FLOMPY -m track -r 0 -t 5 -h 0 <filename>`
+`FLOMPY -m track -r 0 -t 5 -h 0 disk50.trk`
 
 Low level single track dump.
 
-`FLOMPY -m ftrack -r 0 -t 5 -h 0 <filename>`
+`FLOMPY -m ftrack -r 0 -t 5 -h 0 disk50.ftk`
 
 Low level single track dump with per-byte timing.
 
@@ -93,11 +93,17 @@ where all sectors are the same size, and the file just stores all of them
 in C:H:S order, meaning **cylinder** (track), **head** (side), **sector**.
 The first sector in the file is 0:0:1, then 0:0:2... after all the
 sectors on one side are read, we continue on the other side at 0:1:1, 0:1:2...
-and finally proceed to the next track 1:0:1, 1:0:2...
+and finally proceed to the next track 1:0:1, 1:0:2... etc.
 
-Any sectors that could not be read will instead be filled with the fill value
-specified with the `-f` option. Disks with more unusual formatting can't really
-be represented in this kind of file.
+The sector size is normally 512 bytes, and is also usually specified within
+the first sector of the file (i.e. "boot" sector).
+
+Any sectors that could not be read will be retried multiple times,
+but if failed they will instead be filled with the fill value
+specified with the `-f` option.
+
+Disks with more unusual formatting might not be representable with this
+kind of file.
 
 ## Track Dump Format
 
@@ -134,3 +140,10 @@ version, this might give an opportunity to recover some of the damaged data.
 However, even when the data is undamaged, the information read back using this
 method seems to be slightly inconsistent, and it may be worth taking multiple
 readings.
+
+## Compiling
+
+This program was compiled using Open Watcom 1.90 and a WPJ project file is
+included that may be used with it.
+
+[Open Watcom](http://openwatcom.org/)
